@@ -10,9 +10,26 @@ let count = 0;
 
 // Durata della vita delle singole auto (espressa in frame)
 const lifespan = 500;
+const carsPopulation = 25;
 
 // Forza massima dei vettori
 const maxForce = 0.2;
+
+// Variabili per verifiche
+let maxFitnessAchieved = 0;
+let fastTimeAchieved = 100;
+let carsCrashed = 0;
+let carsCrashedAfterDestination = 0;
+let carsCrashedAgainstObstacle = 0;
+let carsAtDestination = 0;
+
+let maxFitnessPar;
+let fastTimePar;
+let carsCrashedPar;
+let carsCrashedAfterDestinationPar;
+let carsCrashedAgainstObstaclePar;
+let carsAtDestinationPar;
+let currentFitnessPar;
 
 // Coordinate e dimensioni dell'ostacolo
 const rx = 350;
@@ -29,6 +46,14 @@ function setup() {
     // Creo un paragrafo usando le funzioni di p5.js
     lifespanDuration = createP();
 
+    maxFitnessPar = createP();
+    fastTimePar = createP();
+    carsCrashedPar = createP();
+    carsCrashedAfterDestinationPar = createP();
+    carsCrashedAgainstObstaclePar = createP();
+    carsAtDestinationPar = createP();
+    currentFitnessPar = createP();
+
     // Creo la destinazione da raggiungere
     destination = createVector(width - 50, height/2);
 }
@@ -43,7 +68,8 @@ function draw() {
     count++;
 
     // Se il conteggio dei frame coincide con la durata vitale delle auto, ricomincio da capo
-    if(count == lifespan) {
+    // Va modificato il modo in cui vengono contate le auto che si fermano (spostare conteggio in update())
+    if(count == lifespan || carsCrashed == carsPopulation) {
 
         // population = new Population();
 
@@ -51,6 +77,12 @@ function draw() {
         population.evaluate();
         population.selection();
         count = 0;
+
+        // Reset valori di Controllo
+        carsCrashed = 0;
+        carsCrashedAfterDestination = 0;
+        carsCrashedAgainstObstacle = 0;
+        carsAtDestination = 0;
     }
 
     fill(255);
@@ -72,6 +104,15 @@ function windowResized() {
     centerCanvas();
 }
 
+function updateData() {
+    maxFitnessPar.html("Max fitness achieved: " + maxFitnessAchieved);
+    fastTimePar.html("Fastest time achieved: " + fastTimeAchieved);
+    carsCrashedPar.html("Cars crashed: " + carsCrashed);
+    carsCrashedAfterDestinationPar.html("Cars crashed after destination: " + carsCrashedAfterDestination);
+    carsCrashedAgainstObstaclePar.html("Cars crashed against obstacle: " + carsCrashedAgainstObstacle);
+    carsAtDestinationPar.html("Cars at destination: " + carsAtDestination);
+}
+
 // Gestisco la popolazione delle mie auto
 function Population() {
 
@@ -79,7 +120,7 @@ function Population() {
     this.cars = [];
 
     // Imposto una proprietà che gestisca quanto sarà numerosa la popolazione
-    this.size = 25;
+    this.size = carsPopulation;
 
     // Gestisco una sorta di nuova generazione, che prenderà gli elementi migliori della generazione precedente
     this.matingPool = [];
@@ -93,6 +134,7 @@ function Population() {
     this.evaluate = function() {
 
         let maxFitness = 0;
+        let fastestTiming = 100;
 
         for (var i = 0; i < this.size; i++) {
             this.cars[i].calculateFitness();
@@ -101,9 +143,28 @@ function Population() {
             if(this.cars[i].fitness > maxFitness) {
                 maxFitness = this.cars[i].fitness;
             }
+
+            // Isolo il valore di tempistica minore
+            if(this.cars[i].timing < fastestTiming) {
+                fastestTiming = this.cars[i].timing;
+            }
         }
 
-        createP(maxFitness);
+        console.log("ULTRA BANANE MEGA " + fastestTiming);
+
+        // Controllo se ho superato il valore adattabilità massimo raggiunto
+        if(maxFitness > maxFitnessAchieved) {
+            maxFitnessAchieved = maxFitness;
+        }
+
+        // Controllo il tempo più veloce al raggiungimento della destinazione
+        if(fastestTiming < fastTimeAchieved) {
+            fastTimeAchieved = fastestTiming;
+            console.log("ULTRA BANANE " + fastTimeAchieved);
+        }
+
+        updateData();
+        currentFitnessPar.html("Current max fitness: " + maxFitness);
 
         // Normalizzo il valore di adattabilità in modo che resti fra 0 e 1
         // Esiste una probabilità di divisione per 0 (bug), ma non ce ne preoccupereremo in questo contesto
@@ -218,11 +279,19 @@ function Car(dna) {
     this.velocity = createVector();
     this.acceleration = createVector();
 
+    // Controllo se sono vicino la destinazione
+    this.near = false;
+
     // Controllo se raggiungo la destinazione
     this.completed = false;
 
     // Controllo se ho colpito l'ostacolo
     this.crashed = false;
+    this.crashedAftedDestination = false;
+    this.crashedAgainstObstacle = false;
+
+    // Provo ad implementare un parametro per la rapidità di raggiungimento traguardo
+    this.timing = 0;
 
     // Ogni auto ha il suo dna personale. Se l'auto è stata generata con un codice genetico, utilizzo il dna ricevuto. Altrimenti genero un dna casuale.
     if(dna) {
@@ -247,17 +316,35 @@ function Car(dna) {
         let distance = dist(this.position.x, this.position.y, destination.x, destination.y);
 
         // Calcolo il valore di adattabilità sulla base della distanza fra l'auto e la destinazione, mappando il valore distance con l'altezza della finestra ed invertendo questo valore
-        this.fitness = map(distance, 0, height, height, 0);
+        this.fitness = map(distance, 0, width, width, 0);
+        this.timing /= 10;
+
+        if(this.near) {
+            this.fitness *= this.timing;
+        }
 
         // Se l'auto raggiunge la destinazione, la sua adattabilità viene aumentata
         if(this.completed) {
             this.fitness *= 10;
+            carsAtDestination++;
         }
 
         // Se l'auto colpisce l'ostacolo, la sua adattabilità viene ridimensionata
         if(this.crashed) {
             this.fitness /= 10;
+            carsCrashed++;
+
+            // Se l'auto colpisce un ostacolo dopo aver superato la destinazione, diminuisco ulteriormente l'adattabilità
+            if(this.crashedAftedDestination) {
+                this.fitness /= 10;
+                carsCrashedAfterDestination++;
+            }
+
+            if(this.crashedAgainstObstacle) {
+                carsCrashedAgainstObstacle++;
+            }
         }
+
     }
 
     // Creo la funzione di update che aggiornerà le proprietà della nostra auto
@@ -265,21 +352,30 @@ function Car(dna) {
 
         // Se la distanza fra l'auto e la destinazione è inferiore a 10px, considero l'auto giunta correttamente a destinazione
         let distance = dist(this.position.x, this.position.y, destination.x, destination.y);
+
+        // Se l'auto arriva nei pressi della destinazione, registro l'evento per calcolare il tempo impiegato
+        if(distance < 30 && !this.near) {
+            this.near = true;
+            this.timing = map(count, 0, lifespan, 100, 0);
+        }
+
         if(distance < 10) {
             this.completed = true;
-
-            // Muovo l'auto alle coordinate della destinazione
-            //this.position = destination;
         }
 
         // Controllo la collisione con l'ostacolo
         if(this.position.x > rx && this.position.x < rx + rw && this.position.y > ry && this.position.y < ry + rh) {
             this.crashed = true;
+            this.crashedAgainstObstacle = true;
         }
 
         // Controllo la collisione con i bordi dell'area
         if(this.position.x > width || this.position.x < 0) {
             this.crashed = true;
+
+            if(this.position.x > width) {
+                this.crashedAftedDestination = true;
+            }
         }
 
         if(this.position.y > height || this.position.y < 0) {
