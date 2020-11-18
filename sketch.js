@@ -2,34 +2,43 @@
 let canvas = {};
 
 let population;
-let lifespanDuration;
 let destination;
 
 // Conto i frame mentre vengono mostrati
 let count = 0;
 
+// Conto le generazioni passate
+let generation = 1;
+
 // Durata della vita delle singole auto (espressa in frame)
 const lifespan = 500;
+
+// Popolazione auto e percentuale di elitismo da applicare
 const carsPopulation = 25;
+let elitism = Math.floor(carsPopulation * 0.2);
 
 // Forza massima dei vettori
 const maxForce = 0.2;
 
 // Variabili per verifiche
 let maxFitnessAchieved = 0;
-let fastTimeAchieved = 100;
+let fastTimeAchieved = 0;
 let carsCrashed = 0;
 let carsCrashedAfterDestination = 0;
 let carsCrashedAgainstObstacle = 0;
 let carsAtDestination = 0;
+let carsCrashedAtStart = 0;
 
+let lifespanDuration;
 let maxFitnessPar;
 let fastTimePar;
 let carsCrashedPar;
+let carsCrashedAtStartPar;
 let carsCrashedAfterDestinationPar;
 let carsCrashedAgainstObstaclePar;
 let carsAtDestinationPar;
 let currentFitnessPar;
+let currentGenerationPar;
 
 // Coordinate e dimensioni dell'ostacolo
 const rx = 350;
@@ -49,13 +58,17 @@ function setup() {
     maxFitnessPar = createP();
     fastTimePar = createP();
     carsCrashedPar = createP();
+    carsCrashedAtStartPar = createP();
     carsCrashedAfterDestinationPar = createP();
     carsCrashedAgainstObstaclePar = createP();
     carsAtDestinationPar = createP();
     currentFitnessPar = createP();
+    currentGenerationPar = createP();
 
     // Creo la destinazione da raggiungere
     destination = createVector(width - 50, height/2);
+
+    updateData();
 }
 
 // Funzione di disegno canvas di p5.js
@@ -67,11 +80,14 @@ function draw() {
     lifespanDuration.html(count);
     count++;
 
+    // console.log("Crashed " + carsCrashed);
+    // console.log("Population " + carsPopulation);
+
     // Se il conteggio dei frame coincide con la durata vitale delle auto, ricomincio da capo
-    // Va modificato il modo in cui vengono contate le auto che si fermano (spostare conteggio in update())
-    if(count == lifespan || carsCrashed == carsPopulation) {
+    if(count == lifespan || (carsCrashed + carsAtDestination) == carsPopulation) {
 
         // population = new Population();
+        generation++;
 
         // Invece di creare una nuova popolazione random, creo la nuova generazione a partire da quella attuale
         population.evaluate();
@@ -83,6 +99,7 @@ function draw() {
         carsCrashedAfterDestination = 0;
         carsCrashedAgainstObstacle = 0;
         carsAtDestination = 0;
+        carsCrashedAtStart = 0;
     }
 
     fill(255);
@@ -105,9 +122,12 @@ function windowResized() {
 }
 
 function updateData() {
+    currentGenerationPar.html("Current generation: " + generation);
     maxFitnessPar.html("Max fitness achieved: " + maxFitnessAchieved);
-    fastTimePar.html("Fastest time achieved: " + fastTimeAchieved);
+    // Divido o moltiplico per 10 per compensare la normalizzazione inserita nella funzione calculateFitness()
+    fastTimePar.html("Fastest time achieved: " + (lifespan * (1 - fastTimeAchieved / 10)) + " - Time: " + (fastTimeAchieved * 10));
     carsCrashedPar.html("Cars crashed: " + carsCrashed);
+    carsCrashedAtStartPar.html("Cars crashed at start: " + carsCrashedAtStart);
     carsCrashedAfterDestinationPar.html("Cars crashed after destination: " + carsCrashedAfterDestination);
     carsCrashedAgainstObstaclePar.html("Cars crashed against obstacle: " + carsCrashedAgainstObstacle);
     carsAtDestinationPar.html("Cars at destination: " + carsAtDestination);
@@ -134,7 +154,8 @@ function Population() {
     this.evaluate = function() {
 
         let maxFitness = 0;
-        let fastestTiming = 100;
+        let fastestTiming = 0;
+        let eliteCars = [];
 
         for (var i = 0; i < this.size; i++) {
             this.cars[i].calculateFitness();
@@ -145,12 +166,10 @@ function Population() {
             }
 
             // Isolo il valore di tempistica minore
-            if(this.cars[i].timing < fastestTiming) {
+            if(this.cars[i].timing > fastestTiming) {
                 fastestTiming = this.cars[i].timing;
             }
         }
-
-        console.log("ULTRA BANANE MEGA " + fastestTiming);
 
         // Controllo se ho superato il valore adattabilità massimo raggiunto
         if(maxFitness > maxFitnessAchieved) {
@@ -158,9 +177,8 @@ function Population() {
         }
 
         // Controllo il tempo più veloce al raggiungimento della destinazione
-        if(fastestTiming < fastTimeAchieved) {
+        if(fastestTiming > fastTimeAchieved) {
             fastTimeAchieved = fastestTiming;
-            console.log("ULTRA BANANE " + fastTimeAchieved);
         }
 
         updateData();
@@ -170,6 +188,11 @@ function Population() {
         // Esiste una probabilità di divisione per 0 (bug), ma non ce ne preoccupereremo in questo contesto
         for (var i = 0; i < this.size; i++) {
             this.cars[i].fitness /= maxFitness;
+
+            // Recupero al massimo il 20% degli individui della generazione precedente che hanno raggiunto almeno il 90% di adattabilità per quella generazione
+            if(this.cars[i].fitness >= 0.9 && eliteCars.length <= elitism) {
+                eliteCars.push(this.cars[i]);
+            }
         }
 
         this.matingPool = [];
@@ -187,7 +210,7 @@ function Population() {
             let newCars = [];
 
             // Per ogni auto creo una nuova generazione con il "codice genetico" recuperato dalla generazione attuale
-            for (var i = 0; i < this.cars.length; i++) {
+            for (var i = 0; i < this.cars.length - eliteCars.length; i++) {
 
                 // Recupero il "dna" dei due genitori casuali
                 let parentA = random(this.matingPool).dna;
@@ -201,6 +224,11 @@ function Population() {
 
                 // Genero la nuova auto passando il "codice genetico" ottenuto dall'incrocio di due genitori
                 newCars[i] = new Car(child);
+            }
+
+            // Aggiungo gli elementi migliori della generazione precedente
+            for (var i = 0; i < eliteCars.length; i++) {
+                newCars.push(new Car(eliteCars[i].dna, 'rgba(255,0,0, 1)'));
             }
 
             // Aggiorno l'attuale popolazione con la nuova generazione
@@ -272,7 +300,7 @@ function DNA(genes) {
 }
 
 // Creo l'oggetto Car per gestire le singole proprietà della mia auto
-function Car(dna) {
+function Car(dna, color) {
 
     // Creo le proprietà base per la nostra auto
     this.position = createVector(0, height/2);
@@ -285,13 +313,23 @@ function Car(dna) {
     // Controllo se raggiungo la destinazione
     this.completed = false;
 
-    // Controllo se ho colpito l'ostacolo
+    // Controllo se ho colpito ostacoli
     this.crashed = false;
-    this.crashedAftedDestination = false;
-    this.crashedAgainstObstacle = false;
+    this.crashedAfterDestination = false;
+    this.crashedAtStart = false;
 
     // Provo ad implementare un parametro per la rapidità di raggiungimento traguardo
     this.timing = 0;
+
+    // Registro evento (near, completed o crashed) una singola volta
+    this.eventCompleted = false;
+
+    // Gestisco l'apparenza delle auto
+    if(color) {
+        this.color = color;
+    } else {
+        this.color = 'rgba(255,255,255, 0.5)';
+    }
 
     // Ogni auto ha il suo dna personale. Se l'auto è stata generata con un codice genetico, utilizzo il dna ricevuto. Altrimenti genero un dna casuale.
     if(dna) {
@@ -319,71 +357,101 @@ function Car(dna) {
         this.fitness = map(distance, 0, width, width, 0);
         this.timing /= 10;
 
-        if(this.near) {
+        if(this.near && !this.crashedAfterDestination) {
             this.fitness *= this.timing;
         }
 
         // Se l'auto raggiunge la destinazione, la sua adattabilità viene aumentata
         if(this.completed) {
             this.fitness *= 10;
-            carsAtDestination++;
         }
 
         // Se l'auto colpisce l'ostacolo, la sua adattabilità viene ridimensionata
         if(this.crashed) {
-            this.fitness /= 10;
-            carsCrashed++;
+            let malus = 10;
+            //this.fitness /= 10;
 
             // Se l'auto colpisce un ostacolo dopo aver superato la destinazione, diminuisco ulteriormente l'adattabilità
-            if(this.crashedAftedDestination) {
-                this.fitness /= 10;
-                carsCrashedAfterDestination++;
+            if(this.crashedAfterDestination) {
+
+                malus *= 20;
+
+                if(this.near) {
+                    malus *= 10;
+                }
             }
 
-            if(this.crashedAgainstObstacle) {
-                carsCrashedAgainstObstacle++;
+            if(this.crashedAtStart) {
+                malus *= 20;
             }
+
+            this.fitness /= malus;
         }
-
     }
 
     // Creo la funzione di update che aggiornerà le proprietà della nostra auto
     this.update = function() {
 
-        // Se la distanza fra l'auto e la destinazione è inferiore a 10px, considero l'auto giunta correttamente a destinazione
+        // Calcolo la distanza fra auto e destinazione
         let distance = dist(this.position.x, this.position.y, destination.x, destination.y);
 
         // Se l'auto arriva nei pressi della destinazione, registro l'evento per calcolare il tempo impiegato
         if(distance < 30 && !this.near) {
             this.near = true;
-            this.timing = map(count, 0, lifespan, 100, 0);
+            this.timing = map(count, 1, lifespan, 100, 1);
         }
 
-        if(distance < 10) {
+        // Se l'auto si trova entro 10px dalla destinazione la considero arrivata
+        if(distance < 10 && !this.completed) {
             this.completed = true;
+            this.timing = map(count, 1, lifespan, 100, 1);
+
+            console.log(this.timing);
+
+            // Registro auto arrivata a destinazione
+            carsAtDestination++;
         }
 
         // Controllo la collisione con l'ostacolo
-        if(this.position.x > rx && this.position.x < rx + rw && this.position.y > ry && this.position.y < ry + rh) {
+        if((this.position.x > rx && this.position.x < rx + rw && this.position.y > ry && this.position.y < ry + rh) && !this.crashed) {
             this.crashed = true;
-            this.crashedAgainstObstacle = true;
+
+            // Registro auto distrutta contro l'ostacolo
+            carsCrashed++;
+            carsCrashedAgainstObstacle++;
         }
 
         // Controllo la collisione con i bordi dell'area
-        if(this.position.x > width || this.position.x < 0) {
+        if((this.position.x > width || this.position.x < 0) && !this.crashed) {
             this.crashed = true;
 
-            if(this.position.x > width) {
-                this.crashedAftedDestination = true;
+            // Registro auto distrutta
+            carsCrashed++;
+
+            if(this.position.x > width && !this.crashedAfterDestination) {
+                this.crashedAfterDestination = true;
+
+                // Registro auto distrutta dopo la destinazione
+                carsCrashedAfterDestination++;
+            }
+
+            if(this.position.x < 0 && !this.crashedAtStart) {
+                // Registro auto distrutta alla partenza
+                carsCrashedAtStart++;
             }
         }
 
-        if(this.position.y > height || this.position.y < 0) {
+        if((this.position.y > height || this.position.y < 0) && !this.crashed) {
             this.crashed = true;
+
+            // Registro auto distrutta
+            carsCrashed++;
         }
 
         // Ad ogni frame di vita dell'auto, applicheremo uno dei geni (che contiene un vettore random) alla nostra auto, per farla muovere
         this.applyForce(this.dna.genes[count]);
+
+        //console.log(carsCrashed);
 
         // L'auto si deve muovere solo se non è ancora giunta a destinazione
         if(!this.completed && !this.crashed) {
@@ -411,7 +479,7 @@ function Car(dna) {
 
         // Gestisco l'apparenza grafica eliminando i bordi ed aggiungendo una leggera trasparenza alle singole auto
         noStroke();
-        fill(255, 150);
+        fill(this.color);
 
         // Uso translate per orientare la mia auto nella direzione in cui si muove
         translate(this.position.x, this.position.y);
