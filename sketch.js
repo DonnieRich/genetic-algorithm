@@ -9,13 +9,27 @@ let count = 0;
 
 // Conto le generazioni passate
 let generation = 1;
+let generationSinceLastUpdate = 0;
 
 // Durata della vita delle singole auto (espressa in frame)
 const lifespan = 500;
 
 // Popolazione auto e percentuale di elitismo da applicare
 const carsPopulation = 25;
-let elitism = Math.floor(carsPopulation * 0.2);
+const elitism = Math.floor(carsPopulation * 0.2);
+
+// Gestisco il valore di convergenza - il numero massimo di generazioni senza che avvenga un miglioramento
+const convergence = 20;
+
+// La prima soluzione ottenuta
+let firstSolution;
+let solutionFound = false;
+
+// L'ultima soluzione ottenuta
+let lastSolution;
+
+// Mostra sempre ultimo confronto
+let lastRun = false;
 
 // Forza massima dei vettori
 const maxForce = 0.2;
@@ -39,6 +53,7 @@ let carsCrashedAgainstObstaclePar;
 let carsAtDestinationPar;
 let currentFitnessPar;
 let currentGenerationPar;
+let convergencePar;
 
 // Coordinate e dimensioni dell'ostacolo
 const rx = 350;
@@ -64,6 +79,7 @@ function setup() {
     carsAtDestinationPar = createP();
     currentFitnessPar = createP();
     currentGenerationPar = createP();
+    convergencePar = createP();
 
     // Creo la destinazione da raggiungere
     destination = createVector(width - 50, height/2);
@@ -74,6 +90,9 @@ function setup() {
 // Funzione di disegno canvas di p5.js
 function draw() {
     background(0);
+
+    // Bloccare in caso di convergenza e far partire la simulazione fra prima ed ultima soluzione
+
     population.run();
 
     // Ad ogni iterazione mostro i frame passati ed aumento il conteggio di 1
@@ -87,12 +106,23 @@ function draw() {
     if(count == lifespan || (carsCrashed + carsAtDestination) == carsPopulation) {
 
         // population = new Population();
-        generation++;
 
-        // Invece di creare una nuova popolazione random, creo la nuova generazione a partire da quella attuale
-        population.evaluate();
-        population.selection();
-        count = 0;
+        // Se non ho ottenuto miglioramenti entro un numero stabilito di generazioni, eseguo la simulazione fra la prima soluzione e l'ultima
+        if(generationSinceLastUpdate == convergence) {
+            population = new Population(firstSolution, lastSolution);
+            count = 0;
+
+            if(!lastRun) {
+                lastRun = true;
+            }
+        } else {
+
+            generation++;
+            // Invece di creare una nuova popolazione random, creo la nuova generazione a partire da quella attuale
+            population.evaluate();
+            population.selection();
+            count = 0;
+        }
 
         // Reset valori di Controllo
         carsCrashed = 0;
@@ -131,23 +161,43 @@ function updateData() {
     carsCrashedAfterDestinationPar.html("Cars crashed after destination: " + carsCrashedAfterDestination);
     carsCrashedAgainstObstaclePar.html("Cars crashed against obstacle: " + carsCrashedAgainstObstacle);
     carsAtDestinationPar.html("Cars at destination: " + carsAtDestination);
+    convergencePar.html("Generations since last valuable update: " + generationSinceLastUpdate + " - Convergence value: " + convergence);
 }
 
 // Gestisco la popolazione delle mie auto
-function Population() {
+function Population(...twoCars) {
 
     // Preparo un array vuoto che conterà la mia popolazione (o parco) auto
-    this.cars = [];
+    if(twoCars.length > 0) {
+        /*twoCars[0].completed = false;
+        twoCars[0].near = false;
+        twoCars[0].crashed = false;
+        twoCars[1].completed = false;
+        twoCars[1].near = false;
+        twoCars[1].crashed = false;*/
+        this.cars = resetCars(twoCars);
+    } else {
+        this.cars = [];
+    }
+
+    // Preparo un array che conterrà le auto migliori della generazione
+    this.eliteCars = [];
 
     // Imposto una proprietà che gestisca quanto sarà numerosa la popolazione
-    this.size = carsPopulation;
+    if(twoCars.length > 0) {
+        this.size = twoCars.length;
+    } else {
+        this.size = carsPopulation;
+    }
 
     // Gestisco una sorta di nuova generazione, che prenderà gli elementi migliori della generazione precedente
     this.matingPool = [];
 
     // Genero la popolazione (o parco) auto
-    for (var i = 0; i < this.size; i++) {
-        this.cars[i] = new Car();
+    if(twoCars.length <= 0) {
+        for (var i = 0; i < this.size; i++) {
+            this.cars[i] = new Car();
+        }
     }
 
     // Richiamo la funzione che, sulle singole auto, calcola il suo grado di adattamento
@@ -155,7 +205,6 @@ function Population() {
 
         let maxFitness = 0;
         let fastestTiming = 0;
-        let eliteCars = [];
 
         for (var i = 0; i < this.size; i++) {
             this.cars[i].calculateFitness();
@@ -174,6 +223,10 @@ function Population() {
         // Controllo se ho superato il valore adattabilità massimo raggiunto
         if(maxFitness > maxFitnessAchieved) {
             maxFitnessAchieved = maxFitness;
+            generationSinceLastUpdate = 0;
+        } else {
+            // Se non ho ottenuto miglioramenti aggiungo 1 al valore di controllo per la convergenza
+            generationSinceLastUpdate++;
         }
 
         // Controllo il tempo più veloce al raggiungimento della destinazione
@@ -190,8 +243,17 @@ function Population() {
             this.cars[i].fitness /= maxFitness;
 
             // Recupero al massimo il 20% degli individui della generazione precedente che hanno raggiunto almeno il 90% di adattabilità per quella generazione
-            if(this.cars[i].fitness >= 0.9 && eliteCars.length <= elitism) {
-                eliteCars.push(this.cars[i]);
+            if(this.cars[i].fitness >= 0.9 && this.eliteCars.length <= elitism) {
+                this.eliteCars.push(this.cars[i]);
+            }
+
+            if(!solutionFound && this.cars[i].completed) {
+                solutionFound = true;
+                firstSolution = this.cars[i];
+            }
+
+            if(this.cars[i].fitness == 1) {
+                lastSolution = this.cars[i];
             }
         }
 
@@ -204,39 +266,42 @@ function Population() {
                 this.matingPool.push(this.cars[i]);
             }
         }
+    }
 
-        // Creo una funzione di selezione "naturale", che prenda in modo casuale due "genitori" fra tutti gli elementi inseriti nell'array matingPool
-        this.selection = function() {
-            let newCars = [];
+    // Creo una funzione di selezione "naturale", che prenda in modo casuale due "genitori" fra tutti gli elementi inseriti nell'array matingPool
+    this.selection = function() {
+        let newCars = [];
 
-            // Per ogni auto creo una nuova generazione con il "codice genetico" recuperato dalla generazione attuale
-            for (var i = 0; i < this.cars.length - eliteCars.length; i++) {
+        // Per ogni auto creo una nuova generazione con il "codice genetico" recuperato dalla generazione attuale
+        for (var i = 0; i < this.cars.length - this.eliteCars.length; i++) {
 
-                // Recupero il "dna" dei due genitori casuali
-                let parentA = random(this.matingPool).dna;
-                let parentB = random(this.matingPool).dna;
+            // Recupero il "dna" dei due genitori casuali
+            let parentA = random(this.matingPool).dna;
+            let parentB = random(this.matingPool).dna;
 
-                // Genero il nuovo DNA tramite crossover dei DNA dei genitori
-                let child = parentA.crossover(parentB);
+            // Genero il nuovo DNA tramite crossover dei DNA dei genitori
+            let child = parentA.crossover(parentB);
 
-                // Richiamo la funzione che introduce mutazioni nel codice dei vettori
-                child.mutation();
+            // Richiamo la funzione che introduce mutazioni nel codice dei vettori
+            child.mutation();
 
-                // Genero la nuova auto passando il "codice genetico" ottenuto dall'incrocio di due genitori
-                newCars[i] = new Car(child);
-            }
-
-            // Aggiungo gli elementi migliori della generazione precedente
-            for (var i = 0; i < eliteCars.length; i++) {
-                newCars.push(new Car(eliteCars[i].dna, 'rgba(255,0,0, 1)'));
-            }
-
-            // Aggiorno l'attuale popolazione con la nuova generazione
-            this.cars = newCars;
-
+            // Genero la nuova auto passando il "codice genetico" ottenuto dall'incrocio di due genitori
+            newCars[i] = new Car(child);
         }
 
+        // Aggiungo gli elementi migliori della generazione precedente
+        for (var i = 0; i < this.eliteCars.length; i++) {
+            newCars.push(new Car(this.eliteCars[i].dna, 'rgba(255,0,0, 1)'));
+        }
+
+        // Aggiorno l'attuale popolazione con la nuova generazione
+        this.cars = newCars;
+
+        // Svuoto l'array di auto elite
+        this.eliteCars = [];
+
     }
+
 
     // Per ogni auto eseguo le funzioni update() e show()
     this.run = function() {
@@ -454,7 +519,7 @@ function Car(dna, color) {
         //console.log(carsCrashed);
 
         // L'auto si deve muovere solo se non è ancora giunta a destinazione
-        if(!this.completed && !this.crashed) {
+        if((!this.completed && !this.crashed) || lastRun) {
 
             // Aggiungo l'accelerazione alla velocità
             this.velocity.add(this.acceleration);
@@ -492,4 +557,13 @@ function Car(dna, color) {
         // Uso push() all'inizio e pop() alla fine per non influenzare altri oggetti auto
         pop();
     }
+}
+
+function resetCars(cars) {
+    for (var i = 0; i < cars.length; i++) {
+        cars[i].position = createVector(0, height/2);
+        cars[i].velocity = createVector();
+        cars[i].acceleration = createVector();
+    }
+    return cars;
 }
