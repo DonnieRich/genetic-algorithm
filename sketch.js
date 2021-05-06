@@ -2,6 +2,7 @@
 let canvas = {};
 
 let population;
+let obstacles = [];
 let destination;
 
 // Conto i frame mentre vengono mostrati
@@ -67,6 +68,8 @@ function setup() {
     centerCanvas();
     population = new Population();
 
+    newObstaclesSet(30);
+
     // Creo un paragrafo usando le funzioni di p5.js
     lifespanDuration = createP();
 
@@ -99,13 +102,8 @@ function draw() {
     lifespanDuration.html(count);
     count++;
 
-    // console.log("Crashed " + carsCrashed);
-    // console.log("Population " + carsPopulation);
-
     // Se il conteggio dei frame coincide con la durata vitale delle auto, ricomincio da capo
     if(count == lifespan || (carsCrashed + carsAtDestination) == carsPopulation) {
-
-        // population = new Population();
 
         // Se non ho ottenuto miglioramenti entro un numero stabilito di generazioni, eseguo la simulazione fra la prima soluzione e l'ultima
         if(generationSinceLastUpdate == convergence) {
@@ -132,8 +130,12 @@ function draw() {
         carsCrashedAtStart = 0;
     }
 
-    fill(255);
-    rect(rx, ry, rw, rh);
+    //fill(255);
+    //rect(rx, ry, rw, rh);
+
+    obstacles.forEach(function(element) {
+        element.show();
+    });
 
     // Disegno la destinazione
     ellipse(destination.x, destination.y, 25, 25);
@@ -164,19 +166,69 @@ function updateData() {
     convergencePar.html("Generations since last valuable update: " + generationSinceLastUpdate + " - Convergence value: " + convergence);
 }
 
+function Obstacle(x = 0, y = 0, scatter = 30) {
+
+    x = x > 0 ? x : getRndInteger(width/2 + 30, width - 30);
+    y = y > 0 ? y : getRndInteger(30, height - 30);
+
+    let rndAngleValue = getRndInteger(0, 1);
+    let phi = rndAngleValue * 2 * Math.PI;
+
+    this.x = x + Math.round(scatter * Math.cos(phi));
+    this.y = y + Math.round(scatter * Math.sin(phi));
+
+    this.w = 5;
+    this.h = 5;
+
+    this.position = createVector(x, y);
+
+    this.show = function() {
+
+        // Uso push() all'inizio e pop() alla fine per non influenzare altri oggetti auto
+        push();
+
+        // Gestisco l'apparenza grafica eliminando i bordi ed aggiungendo una leggera trasparenza alle singole auto
+        noStroke();
+        fill(255);
+
+        ellipse(this.position.x, this.position.y, this.w, this.h);
+
+        // Uso push() all'inizio e pop() alla fine per non influenzare altri oggetti auto
+        pop();
+    }
+}
+
+function newObstaclesSet(n) {
+    let distance = 30;
+
+    while (obstacles.length < n) {
+        
+        let obst = new Obstacle();
+
+        if (obstacles.length > 0) {
+            let prevObst = obstacles[obstacles.length - 1];
+            distance = dist(obst.position.x, obst.position.y, prevObst.position.x, prevObst.position.y);
+        }
+
+        if (distance >= 30) {
+            obstacles.push(obst);
+        }
+    }
+}
+
+function getRndInteger(min, max) {
+    return Math.floor(Math.random() * (max - min + 1) ) + min;
+}
+
 // Gestisco la popolazione delle mie auto
 function Population(...twoCars) {
 
     // Preparo un array vuoto che conterà la mia popolazione (o parco) auto
     if(twoCars.length > 0) {
-        /*twoCars[0].completed = false;
-        twoCars[0].near = false;
-        twoCars[0].crashed = false;
-        twoCars[1].completed = false;
-        twoCars[1].near = false;
-        twoCars[1].crashed = false;*/
+
         this.cars = resetCars(twoCars);
     } else {
+ 
         this.cars = [];
     }
 
@@ -260,7 +312,7 @@ function Population(...twoCars) {
         this.matingPool = [];
         for (var i = 0; i < this.size; i++) {
             // Moltiplico il valore di fitness per 100 in modo da favorire la presenza di auto con un valore adattabilità maggiore
-            // Esempio: un'auto con il valore adattabilità 1, sarà presente 100 volte, mentre un'auto con valore adattabilità 0.3 sarà presente solo 3 volte.
+            // Esempio: un'auto con il valore adattabilità 1, sarà presente 100 volte, mentre un'auto con valore adattabilità 0.3 sarà presente solo 30 volte.
             let n = this.cars[i].fitness * 100;
             for (var j = 0; j < n; j++) {
                 this.matingPool.push(this.cars[i]);
@@ -477,14 +529,21 @@ function Car(dna, color) {
             carsAtDestination++;
         }
 
-        // Controllo la collisione con l'ostacolo
-        if((this.position.x > rx && this.position.x < rx + rw && this.position.y > ry && this.position.y < ry + rh) && !this.crashed) {
-            this.crashed = true;
+        obstacles.forEach((element) => {
 
-            // Registro auto distrutta contro l'ostacolo
-            carsCrashed++;
-            carsCrashedAgainstObstacle++;
-        }
+            if(
+                (this.position.x > element.position.x 
+                && this.position.x < element.position.x + element.w 
+                && this.position.y > element.position.y 
+                && this.position.y < element.position.y + element.h) 
+                && !this.crashed) {
+                this.crashed = true;
+    
+                // Registro auto distrutta contro l'ostacolo
+                carsCrashed++;
+                carsCrashedAgainstObstacle++;
+            }
+        });
 
         // Controllo la collisione con i bordi dell'area
         if((this.position.x > width || this.position.x < 0) && !this.crashed) {
