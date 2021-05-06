@@ -3,6 +3,7 @@ let canvas = {};
 
 let population;
 let obstacles = [];
+const numberOfObstacles = 50;
 let destination;
 
 // Conto i frame mentre vengono mostrati
@@ -56,19 +57,13 @@ let currentFitnessPar;
 let currentGenerationPar;
 let convergencePar;
 
-// Coordinate e dimensioni dell'ostacolo
-const rx = 350;
-const ry = 150;
-const rw = 10;
-const rh = 200;
-
 // Funzione di setup di p5.js
 function setup() {
     canvas = createCanvas(750, 500);
     centerCanvas();
     population = new Population();
 
-    newObstaclesSet(30);
+    newObstaclesSet(numberOfObstacles);
 
     // Creo un paragrafo usando le funzioni di p5.js
     lifespanDuration = createP();
@@ -120,7 +115,12 @@ function draw() {
             population.evaluate();
             population.selection();
             count = 0;
+
         }
+
+        obstacles = obstacles.map(function(element) {
+            return new Obstacle(element.x, element.y, 30, element.dna);
+        });
 
         // Reset valori di Controllo
         carsCrashed = 0;
@@ -128,12 +128,12 @@ function draw() {
         carsCrashedAgainstObstacle = 0;
         carsAtDestination = 0;
         carsCrashedAtStart = 0;
+
+
     }
 
-    //fill(255);
-    //rect(rx, ry, rw, rh);
-
     obstacles.forEach(function(element) {
+        element.update();
         element.show();
     });
 
@@ -166,21 +166,71 @@ function updateData() {
     convergencePar.html("Generations since last valuable update: " + generationSinceLastUpdate + " - Convergence value: " + convergence);
 }
 
-function Obstacle(x = 0, y = 0, scatter = 30) {
+function Obstacle(x = false, y = false, scatter = 30, dna = {}) {
 
-    x = x > 0 ? x : getRndInteger(width/2 + 30, width - 30);
-    y = y > 0 ? y : getRndInteger(30, height - 30);
+    let startX = getRndInteger(width/2 + 30, width - 30);
+    let startY = getRndInteger(30, height - 30);
 
     let rndAngleValue = getRndInteger(0, 1);
     let phi = rndAngleValue * 2 * Math.PI;
 
-    this.x = x + Math.round(scatter * Math.cos(phi));
-    this.y = y + Math.round(scatter * Math.sin(phi));
+    x = x !== false ? x : startX + Math.round(scatter * Math.cos(phi));
+    y = y !== false ? y : startY + Math.round(scatter * Math.sin(phi));
 
-    this.w = 5;
-    this.h = 5;
+    this.x = x;
+    this.y = y;
+
+    this.r = 2.5;
 
     this.position = createVector(x, y);
+    this.velocity = createVector();
+    this.acceleration = createVector();
+
+    if(Object.keys(dna).length > 0) {
+        this.dna = dna;
+    } else {
+        this.dna = new DNA();
+    }
+
+    // Creo la funzione che si occuperò di applicare la forza alla proprietà accelerazione
+    this.applyForce = function(force) {
+        this.acceleration.add(force);
+    }
+
+    // Creo la funzione di update che aggiornerà le proprietà della nostra auto
+    this.update = function() {
+
+        // Controllo la collisione con i bordi dell'area
+        if (this.position.x > width - this.r) {
+            this.position.x = width - this.r;
+            this.velocity.x *= -1;
+        } else if (this.position.x < this.r) {
+            this.position.x = this.r;
+            this.velocity.x *= -1;
+        } else if (this.position.y > height - this.r) {
+            this.position.y = height - this.r;
+            this.velocity.y *= -1;
+        } else if (this.position.y < this.r) {
+            this.position.y = this.r;
+            this.velocity.y *= -1;
+        }
+
+        // Ad ogni frame di vita dell'auto, applicheremo uno dei geni (che contiene un vettore random) alla nostra auto, per farla muovere
+        this.applyForce(this.dna.genes[count]);
+
+        // Aggiungo l'accelerazione alla velocità
+        this.velocity.add(this.acceleration);
+
+        // Uso la velocità per determinare la nuova posizione
+        this.position.add(this.velocity);
+
+        // Reset dell'accelerazione (moltiplicazione per zero)
+        this.acceleration.mult(0);
+
+        // Aggiungo un limite alla velocità
+        this.velocity.limit(4);
+
+    }
 
     this.show = function() {
 
@@ -191,7 +241,7 @@ function Obstacle(x = 0, y = 0, scatter = 30) {
         noStroke();
         fill(255);
 
-        ellipse(this.position.x, this.position.y, this.w, this.h);
+        ellipse(this.position.x, this.position.y, this.r * 2, this.r * 2);
 
         // Uso push() all'inizio e pop() alla fine per non influenzare altri oggetti auto
         pop();
@@ -423,6 +473,8 @@ function Car(dna, color) {
     this.position = createVector(0, height/2);
     this.velocity = createVector();
     this.acceleration = createVector();
+    this.w = 25;
+    this.h = 5;
 
     // Controllo se sono vicino la destinazione
     this.near = false;
@@ -506,36 +558,26 @@ function Car(dna, color) {
         }
     }
 
-    // Creo la funzione di update che aggiornerà le proprietà della nostra auto
-    this.update = function() {
+    this.checkCollision = function() {
 
-        // Calcolo la distanza fra auto e destinazione
-        let distance = dist(this.position.x, this.position.y, destination.x, destination.y);
+        let carBottom = this.position.y + this.h / 2;
+        let carTop = this.position.y - this.h / 2;
+        let carLeft = this.position.x - this.w / 2;
+        let carRight = this.position.x + this.w / 2;
 
-        // Se l'auto arriva nei pressi della destinazione, registro l'evento per calcolare il tempo impiegato
-        if(distance < 30 && !this.near) {
-            this.near = true;
-            this.timing = map(count, 1, lifespan, 100, 1);
-        }
-
-        // Se l'auto si trova entro 10px dalla destinazione la considero arrivata
-        if(distance < 10 && !this.completed) {
-            this.completed = true;
-            this.timing = map(count, 1, lifespan, 100, 1);
-
-            console.log(this.timing);
-
-            // Registro auto arrivata a destinazione
-            carsAtDestination++;
-        }
-
+        // Thanks to https://stackoverflow.com/a/44912084/12828579
         obstacles.forEach((element) => {
 
+            let bottom = element.position.y + element.r;
+            let top = element.position.y - element.r;
+            let left = element.position.x - element.r;
+            let right = element.position.x + element.r;
+
             if(
-                (this.position.x > element.position.x 
-                && this.position.x < element.position.x + element.w 
-                && this.position.y > element.position.y 
-                && this.position.y < element.position.y + element.h) 
+                (carRight > left
+                && carLeft < right
+                && carBottom > top 
+                && carTop < bottom) 
                 && !this.crashed) {
                 this.crashed = true;
     
@@ -571,6 +613,31 @@ function Car(dna, color) {
             // Registro auto distrutta
             carsCrashed++;
         }
+    }
+
+    // Creo la funzione di update che aggiornerà le proprietà della nostra auto
+    this.update = function() {
+
+        // Calcolo la distanza fra auto e destinazione
+        let distance = dist(this.position.x, this.position.y, destination.x, destination.y);
+
+        // Se l'auto arriva nei pressi della destinazione, registro l'evento per calcolare il tempo impiegato
+        if(distance < 30 && !this.near) {
+            this.near = true;
+            this.timing = map(count, 1, lifespan, 100, 1);
+        }
+
+        // Se l'auto si trova entro 10px dalla destinazione la considero arrivata
+        if(distance < 10 && !this.completed) {
+            this.completed = true;
+            this.timing = map(count, 1, lifespan, 100, 1);
+
+            // Registro auto arrivata a destinazione
+            carsAtDestination++;
+        }
+
+        // controllo le varie collisioni
+        this.checkCollision();
 
         // Ad ogni frame di vita dell'auto, applicheremo uno dei geni (che contiene un vettore random) alla nostra auto, per farla muovere
         this.applyForce(this.dna.genes[count]);
@@ -611,7 +678,7 @@ function Car(dna, color) {
 
         // Disegno un rettangolo che rappresenti la mia auto
         rectMode(CENTER);
-        rect(0, 0, 25, 5);
+        rect(0, 0, this.w, this.h);
 
         // Uso push() all'inizio e pop() alla fine per non influenzare altri oggetti auto
         pop();
